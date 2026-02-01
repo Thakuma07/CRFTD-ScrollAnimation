@@ -1,49 +1,62 @@
-import { serviceCopy } from "./services.js";
+import { servicesCopy } from "./services.js";
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+    // Wait for fonts to load for accurate width measurement
+    await document.fonts.ready;
+
     gsap.registerPlugin(ScrollTrigger);
 
     const lenis = new Lenis();
-    lenis.on("Scroll", ScrollTrigger.update);
-    gsap.ticker.add((time) => {
-        lenis.raf(time * 1000);
-    });
-
+    lenis.on("scroll", ScrollTrigger.update);
+    gsap.ticker.add((time) => lenis.raf(time * 1000));
     gsap.ticker.lagSmoothing(0);
 
     const stickySection = document.querySelector(".sticky");
-    const stickyHeight = window.innerHeight * 8;
     const services = document.querySelectorAll(".service");
     const indicator = document.querySelector(".indicator");
     const currentCount = document.querySelector("#current-count");
     const serviceImg = document.querySelector(".service-img");
-    const serviceCopy = document.querySelector(".service-copy p");
-    const serviceHeight = 38;
-    const imgHeight = 250;
+    const serviceCopyEl = document.querySelector(".service-copy p");
 
-    serviceCopy.textContent = serviceCopy[0][0];
-    let currentSplitText = new SplitType(serviceCopy, { types: "lines" });
+    // Dynamic height calculation to account for margins
+    const firstService = services[0];
+    const serviceStyle = window.getComputedStyle(firstService);
+    const serviceHeight = firstService.offsetHeight + parseFloat(serviceStyle.marginBottom);
 
-    const measureContainer = document.createElement("div");
-    measureContainer.style.cssText = `
-        position: absolute;
-        visibility: hidden;
-        height: auto;
-        width: auto;
-        white-space: nowrap;
-        font-family: "PP NeueBit";
-        font-size: 60px;
-        font-weight: 600;
-        text-transform: uppercase;
+    // Dynamic image height from CSS
+    const imgExample = document.querySelector(".img");
+    const imgHeight = imgExample.offsetHeight;
+
+    // Total scroll distance
+    const stickyHeight = window.innerHeight * services.length;
+
+    serviceCopyEl.textContent = servicesCopy[0][0];
+    let split = new SplitType(serviceCopyEl, { types: "lines" });
+
+    const measure = document.createElement("div");
+    measure.style.cssText = `
+        position:absolute;
+        visibility:hidden;
+        white-space:nowrap;
+        text-transform:uppercase;
     `;
-    document.body.appendChild(measureContainer);
 
-    const serviceWidths = Array.from(services).map((service) => {
-        measureContainer.textContent = service.querySelector("p").textContent;
-        return measureContainer.offsetWidth + 8;
+    // Copy font styles from the actual service text to ensure accurate width measurement
+    const firstServiceText = firstService.querySelector("p");
+    const textStyle = window.getComputedStyle(firstServiceText);
+    measure.style.fontFamily = textStyle.fontFamily;
+    measure.style.fontSize = textStyle.fontSize;
+    measure.style.fontWeight = textStyle.fontWeight;
+    measure.style.letterSpacing = textStyle.letterSpacing;
+
+    document.body.appendChild(measure);
+
+    const serviceWidths = [...services].map(service => {
+        measure.textContent = service.innerText;
+        return measure.offsetWidth + 8;
     });
 
-    document.body.removeChild(measureContainer);
+    document.body.removeChild(measure);
 
     gsap.set(indicator, {
         width: serviceWidths[0],
@@ -51,36 +64,25 @@ document.addEventListener("DOMContentLoaded", () => {
         left: "50%",
     });
 
-    const scrollPerService = window.innerHeight;
     let currentIndex = 0;
 
     const animateTextChange = (index) => {
-        return new Promise((resolve) => {
-            gsap.to(currentSplitText.lines, {
+        return new Promise(resolve => {
+            gsap.to(split.lines, {
                 opacity: 0,
                 y: -20,
-                duration: 0.5,
                 stagger: 0.03,
-                ease: "power3.inOut",
                 onComplete: () => {
-                    currentSplitText.revert();
-
-                    const newText = serviceCopy[index][0];
-                    serviceCopy.textContent = newText;
-
-                    currentSplitText = new SplitType(serviceCopy, {
-                        types: "lines",
-                    });
-
-                    gsap.set(currentSplitText.lines, {
+                    split.revert();
+                    serviceCopyEl.textContent = servicesCopy[index][0];
+                    split = new SplitType(serviceCopyEl, { types: "lines" });
+                    gsap.from(split.lines, {
                         opacity: 0,
                         y: 20,
-                        duration: 0.5,
                         stagger: 0.03,
-                        ease: "power3.out",
-                        onCOmplete: resolve,
+                        onComplete: resolve
                     });
-                },
+                }
             });
         });
     };
@@ -88,49 +90,57 @@ document.addEventListener("DOMContentLoaded", () => {
     ScrollTrigger.create({
         trigger: stickySection,
         start: "top top",
-        end: `${stickyHeight}px`,
+        end: `+=${stickyHeight}`,
         pin: true,
-        onUpdate: async (self) => {
-            const progress = self.progress;
-            gsap.set(".progress", { scaleY: progress });
+        scrub: true,
+        onUpdate: (self) => {
+            // Use progress for more robust index calculation
+            let index = Math.floor(self.progress * services.length);
+            // Clamp index to valid range
+            index = Math.max(0, Math.min(index, services.length - 1));
 
-            const scrollPosition = Math.max(0, self.scroll() - window.innerHeight);
-            const activeIndex = Math.floor(scrollPosition / scrollPerService);
+            if (index !== currentIndex) {
+                currentIndex = index;
 
-            if (
-                activeIndex >= 0 &&
-                activeIndex < services.length &&
-                currentIndex !== activeIndex
-            ) {
-                currentIndex = activeIndex;
+                services.forEach(s => s.classList.remove("active"));
+                services[index].classList.add("active");
 
-                services.forEach((service) => service.classList.remove("active"));
-                
-                await Promise.all([
-                    gsap.to(inducator, {
-                        y: activeIndex * serviceHeight,
-                        width: serviceWidths[activeIndex],
-                        duration: 0.5,
-                        ease: "power3.inOut",
-                        overwrite: true,
-                    }),
-                    gsap.to(serviceImg, {
-                        y: -(activeIndex * imgHeight),
-                        duration: 0.5,
-                        ease: "power3.inOut",
-                        overwrite: true,
-                    }),
+                // Kill overlapping animations for smoothness
+                gsap.killTweensOf([indicator, serviceImg, currentCount]);
 
-                    gsap.to(currentCount, {
-                        innerText: activeIndex + 1,
-                        snap: { innerText: 1 },
-                        duration: 0.3,
-                        ease: "power3.out",
-                    }),
+                gsap.to(indicator, {
+                    y: index * serviceHeight,
+                    width: serviceWidths[index],
+                    duration: 0.5,
+                    ease: "power2.out"
+                });
 
-                    animateTextChange(activeIndex),
-                ]);
+                gsap.to(serviceImg, {
+                    y: -(index * imgHeight),
+                    duration: 0.5,
+                    ease: "power2.out"
+                });
+
+                gsap.to(currentCount, {
+                    innerText: index + 1,
+                    snap: { innerText: 1 },
+                    duration: 0.3
+                });
+
+                animateTextChange(index);
             }
-        },
+        }
+    });
+
+    ScrollTrigger.refresh();
+
+    // Handle resize to ensure calculations remain correct across breakpoints
+    let lastWidth = window.innerWidth;
+    window.addEventListener('resize', () => {
+        if (window.innerWidth !== lastWidth) {
+            lastWidth = window.innerWidth;
+            location.reload();
+        }
     });
 });
+
